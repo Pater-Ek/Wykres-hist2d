@@ -85,8 +85,6 @@ def draw_hist2d():
         if bins_count < 2:
             messagebox.showerror("Błąd", "Liczba koszy musi być co najmniej 2!")
             return
-        if bins_count > 100:
-            messagebox.showwarning("Ostrzeżenie", "Duża liczba koszy może wpłynąć na wydajność!")
     except ValueError:
         messagebox.showerror("Błąd", "Podaj prawidłową liczbę koszy!")
         return

@@ -1,0 +1,297 @@
+# Importowanie modułu tkinter do tworzenia interfejsu graficznego
+import tkinter as tk
+# Importowanie messagebox (okna dialogowe) i filedialog (okna wyboru plików) z tkinter
+from tkinter import messagebox, filedialog
+# Importowanie FigureCanvasTkAgg do osadzania wykresów matplotlib w tkinter
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# Importowanie matplotlib.pyplot do tworzenia wykresów
+import matplotlib.pyplot as plt
+
+# Zmienna globalna przechowująca aktualny wykres (używana do eksportu)
+current_figure = None
+
+# Definicja funkcji do wczytywania danych z pliku
+def load_data_from_file():
+    # Pobieranie wartości checkbox - czy używać nagłówków z pliku
+    use_header = var_header.get()
+    # Pobieranie niestandardowej nazwy osi X (tylko jeśli nie używamy nagłówków)
+    custom_label_x = entry_label_x.get() if not use_header else ''
+    # Pobieranie niestandardowej nazwy osi Y (tylko jeśli nie używamy nagłówków)
+    custom_label_y = entry_label_y.get() if not use_header else ''
+    
+    # Otwieranie okna dialogowego do wyboru pliku
+    filepath = filedialog.askopenfilename(
+        title="Wybierz plik z danymi",  # Tytuł okna
+        filetypes=[("Pliki tekstowe", "*.txt *.csv"), ("Wszystkie pliki", "*.*")]  # Filtry plików
+    )
+    # Jeśli użytkownik anulował wybór pliku, zwróć None
+    if not filepath:
+        return None, None, None, None
+
+    # Inicjalizacja pustych list na dane X i Y
+    x = []
+    y = []
+    # Ustawianie domyślnych etykiet osi
+    label_x = custom_label_x if not use_header else "X"
+    label_y = custom_label_y if not use_header else "Y"
+    
+    # Blok try-except do obsługi błędów podczas czytania pliku
+    try:
+        # Otwieranie pliku w trybie odczytu z kodowaniem UTF-8
+        with open(filepath, 'r', encoding='utf-8') as f:
+            # Wczytanie wszystkich linii z pliku
+            lines = f.readlines()
+            # Sprawdzenie czy plik nie jest pusty
+            if not lines:
+                messagebox.showerror("Błąd", "Plik powinien zawierać dane.")
+                return None, None, None, None
+
+            # Jeśli używamy nagłówków z pliku
+            if use_header:
+                # Sprawdzenie czy plik ma co najmniej 2 linie (nagłówek + dane)
+                if len(lines) < 2:
+                    messagebox.showerror("Błąd", "Plik powinien zawierać nagłówki i dane.")
+                    return None, None, None, None
+                
+                # Pobieranie pierwszej linii jako nagłówek i usuwanie białych znaków
+                header_line = lines[0].strip()
+                # Zamiana separatorów na tabulatory i podział na części
+                header_parts = header_line.replace(';', '\t').replace(',', '\t').split('\t')
+                
+                # Jeśli nagłówek ma co najmniej 2 kolumny, użyj ich jako etykiet osi
+                if len(header_parts) >= 2:
+                    label_x = header_parts[0].strip()  # Pierwsza kolumna jako etykieta X
+                    label_y = header_parts[1].strip()  # Druga kolumna jako etykieta Y
+                
+                # Dane zaczynają się od drugiej linii
+                data_lines = lines[1:]
+            else:
+                # Jeśli nie używamy nagłówków, wszystkie linie to dane
+                data_lines = lines
+
+            # Przetwarzanie każdej linii danych
+            for line in data_lines:
+                # Czyszczenie linii i zamiana separatorów na spacje, następnie podział
+                parts = (
+                    line.strip()           # Usunięcie białych znaków z początku i końca
+                    .replace(';', ' ')     # Zamiana średników na spacje
+                    .replace(',', ' ')     # Zamiana przecinków na spacje
+                    .replace('\t', ' ')    # Zamiana tabulatorów na spacje
+                    .split()               # Podział na elementy
+                )
+                # Jeśli linia ma co najmniej 2 wartości
+                if len(parts) >= 2:
+                    try:
+                        # Konwersja pierwszej wartości na float (zamiana przecinków na kropki)
+                        x_val = float(parts[0].replace(',', '.').replace(';', '.'))
+                        # Konwersja drugiej wartości na float
+                        y_val = float(parts[1].replace(',', '.').replace(';', '.'))
+                        # Dodanie wartości do list
+                        x.append(x_val)
+                        y.append(y_val)
+                    except ValueError:
+                        # Jeśli konwersja się nie powiedzie, pomiń tę linię
+                        continue
+
+    # Obsługa innych błędów przy czytaniu pliku
+    except Exception as e:
+        messagebox.showerror("Błąd", f"Nie udało się odczytać pliku: {e}")
+        return None, None, None, None
+
+    # Sprawdzenie czy dane są prawidłowe
+    if not x or not y or len(x) != len(y):
+        messagebox.showerror("Błąd", "Nieprawidłowe lub niekompletne dane w pliku.")
+        return None, None, None, None
+
+    # Zwrócenie wczytanych danych i etykiet
+    return x, y, label_x, label_y
+
+# Funkcja do rysowania histogramu 2D
+def draw_hist2d():
+    # Odwołanie do zmiennej globalnej przechowującej wykres
+    global current_figure
+    
+    # Wczytanie danych z pliku
+    x, y, label_x, label_y = load_data_from_file()
+    
+    # Jeśli wczytywanie się nie powiodło, zakończ funkcję
+    if x is None or y is None:
+        return
+
+    # Obsługa liczby koszy (bins) dla histogramu
+    try:
+        # Pobranie liczby koszy z pola tekstowego i konwersja na int
+        bins_count = int(entry_bins.get())
+        # Sprawdzenie czy liczba koszy jest prawidłowa (minimum 2)
+        if bins_count < 2:
+            messagebox.showerror("Błąd", "Liczba koszy musi być co najmniej 2!")
+            return
+        # Ostrzeżenie przy dużej liczbie koszy
+        if bins_count > 100:
+            messagebox.showwarning("Ostrzeżenie", "Duża liczba koszy może wpłynąć na wydajność!")
+    except ValueError:
+        # Obsługa błędu gdy użytkownik wprowadzi nieprawidłową wartość
+        messagebox.showerror("Błąd", "Podaj prawidłową liczbę koszy!")
+        return
+
+    # Usunięcie wszystkich poprzednich elementów z ramki wykresu
+    for widget in frame_plot.winfo_children():
+        widget.destroy()
+
+    # Utworzenie nowego wykresu matplotlib o rozmiarze 6x5 cali
+    fig, ax = plt.subplots(figsize=(6, 5))
+    # Utworzenie histogramu 2D z podaną liczbą koszy
+    h = ax.hist2d(x, y, bins=bins_count)
+    # Ustawienie etykiety osi X
+    ax.set_xlabel(label_x)
+    # Ustawienie etykiety osi Y
+    ax.set_ylabel(label_y)
+    # Ustawienie tytułu wykresu z informacją o liczbie koszy
+    ax.set_title(f'Histogram 2D ({bins_count}x{bins_count} koszy)')
+    # Dodanie paska kolorów (colorbar) z etykietą
+    fig.colorbar(h[3], ax=ax, label='Liczba punktów')
+    # Automatyczne dopasowanie layoutu
+    fig.tight_layout()
+
+    # Zapisanie wykresu w zmiennej globalnej (dla eksportu)
+    current_figure = fig
+
+    # Utworzenie canvas'a tkinter z wykresem matplotlib
+    canvas = FigureCanvasTkAgg(fig, master=frame_plot)
+    # Narysowanie wykresu
+    canvas.draw()
+    # Umieszczenie canvas'a w ramce z wypełnieniem całej przestrzeni
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    # Aktywowanie przycisku eksportu
+    btn_export.config(state="normal")
+
+# Funkcja do eksportowania histogramu do pliku PNG
+def export_to_png():
+    # Odwołanie do zmiennej globalnej z wykresem
+    global current_figure
+    
+    # Otworzenie okna dialogowego do zapisania pliku
+    filepath = filedialog.asksaveasfilename(
+        title="Zapisz histogram jako PNG",    # Tytuł okna
+        defaultextension=".png",              # Domyślne rozszerzenie
+        filetypes=[("Pliki PNG", "*.png"), ("Wszystkie pliki", "*.*")]  # Filtry plików
+    )
+    
+    # Jeśli użytkownik anulował zapis, zakończ funkcję
+    if not filepath:
+        return
+    
+    # Blok try-except do obsługi błędów podczas zapisu
+    try:
+        # Zapisanie wykresu jako PNG z wysoką rozdzielczością
+        current_figure.savefig(
+            filepath,                # Ścieżka do pliku
+            format='png',           # Format pliku
+            dpi=300,                # Rozdzielczość (dots per inch)
+            bbox_inches='tight',    # Ciasne obcinanie marginesów
+            facecolor='white',      # Kolor tła
+            edgecolor='none'        # Brak koloru krawędzi
+        )
+        # Wyświetlenie komunikatu o sukcesie
+        messagebox.showinfo("Sukces", f"Histogram został zapisany jako:\n{filepath}")
+    except Exception as e:
+        # Obsługa błędów podczas zapisu
+        messagebox.showerror("Błąd", f"Nie udało się zapisać pliku: {e}")
+
+# Funkcja obsługująca zmianę stanu checkbox'a nagłówków
+def on_header_toggle():
+    # Jeśli checkbox jest zaznaczony (używamy nagłówków)
+    if var_header.get():
+        # Wyłączenie pól do wprowadzania niestandardowych nazw osi
+        entry_label_x.config(state="disabled")
+        entry_label_y.config(state="disabled")
+    else:
+        # Włączenie pól do wprowadzania niestandardowych nazw osi
+        entry_label_x.config(state="normal")
+        entry_label_y.config(state="normal")
+
+# Utworzenie głównego okna aplikacji
+root = tk.Tk()
+# Ustawienie tytułu okna
+root.title("Histogram 2D")
+# Ustawienie rozmiaru okna (szerokość x wysokość)
+root.geometry("800x600")
+
+# Utworzenie etykiety informacyjnej
+label_info = tk.Label(root, text="Wczytaj dane z pliku .csv lub .txt")
+# Umieszczenie etykiety z marginesem górnym
+label_info.pack(pady=(10,0))
+
+# Utworzenie zmiennej typu IntVar dla checkbox'a (domyślnie zaznaczony)
+var_header = tk.IntVar(value=1)
+# Utworzenie ramki dla checkbox'a
+frame_check = tk.Frame(root)
+# Utworzenie checkbox'a do wyboru czy używać nagłówków
+check_header = tk.Checkbutton(
+    frame_check, text="Pobierz nazwy zmiennych z pierwszego wiersza pliku",
+    variable=var_header, command=on_header_toggle
+)
+# Umieszczenie checkbox'a po lewej stronie ramki
+check_header.pack(side="left")
+# Umieszczenie ramki checkbox'a z marginesem
+frame_check.pack(pady=3)
+
+# Utworzenie ramki dla pól nazw osi
+frame_labels = tk.Frame(root)
+# Etykieta dla pola nazwy osi X
+tk.Label(frame_labels, text="Nazwa osi X:").pack(side="left")
+# Pole tekstowe dla nazwy osi X
+entry_label_x = tk.Entry(frame_labels, width=15)
+# Wstawienie domyślnej wartości "X"
+entry_label_x.insert(0, "X")
+# Umieszczenie pola z marginesem
+entry_label_x.pack(side="left", padx=5)
+# Etykieta dla pola nazwy osi Y
+tk.Label(frame_labels, text="Nazwa osi Y:").pack(side="left")
+# Pole tekstowe dla nazwy osi Y
+entry_label_y = tk.Entry(frame_labels, width=15)
+# Wstawienie domyślnej wartości "Y"
+entry_label_y.insert(0, "Y")
+# Umieszczenie pola z marginesem
+entry_label_y.pack(side="left", padx=5)
+# Umieszczenie ramki etykiet z marginesem
+frame_labels.pack(pady=3)
+
+# Utworzenie ramki dla ustawienia liczby koszy
+frame_bins = tk.Frame(root)
+# Etykieta dla pola liczby koszy
+tk.Label(frame_bins, text="Liczba koszy:").pack(side="left")
+# Pole tekstowe dla liczby koszy
+entry_bins = tk.Entry(frame_bins, width=8)
+# Wstawienie domyślnej wartości "10"
+entry_bins.insert(0, "10")
+# Umieszczenie pola z marginesem
+entry_bins.pack(side="left", padx=5)
+# Umieszczenie ramki z marginesem
+frame_bins.pack(pady=5)
+
+# Wywołanie funkcji do ustawienia początkowego stanu pól (wyłączenia gdy checkbox zaznaczony)
+on_header_toggle()
+
+# Utworzenie ramki dla przycisków
+frame_buttons = tk.Frame(root)
+# Przycisk do wyboru pliku i rysowania histogramu
+btn_file = tk.Button(frame_buttons, text="Wybierz plik i rysuj histogram 2D", command=draw_hist2d)
+# Umieszczenie przycisku po lewej stronie z marginesem
+btn_file.pack(side="left", padx=5)
+
+# Przycisk do eksportu (początkowo wyłączony)
+btn_export = tk.Button(frame_buttons, text="Eksportuj do PNG", command=export_to_png, state="disabled")
+# Umieszczenie przycisku po lewej stronie z marginesem
+btn_export.pack(side="left", padx=5)
+# Umieszczenie ramki przycisków z marginesem
+frame_buttons.pack(pady=10)
+
+# Utworzenie ramki dla wykresu
+frame_plot = tk.Frame(root)
+# Umieszczenie ramki z wypełnieniem całej dostępnej przestrzeni
+frame_plot.pack(fill=tk.BOTH, expand=True)
+
+# Uruchomienie głównej pętli aplikacji tkinter
+root.mainloop()
