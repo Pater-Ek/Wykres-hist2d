@@ -1,3 +1,301 @@
+# Import the tkinter module for creating the graphical user interface
+import tkinter as tk
+# Import messagebox (dialog boxes) and filedialog (file selection windows) from tkinter
+from tkinter import messagebox, filedialog
+# Import FigureCanvasTkAgg for embedding matplotlib plots into tkinter
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+# Import matplotlib.pyplot for creating plots
+import matplotlib.pyplot as plt
+
+# Global variable storing the current plot (used for export)
+current_figure = None
+
+# Function definition for loading data from a file
+def load_data_from_file():
+    # Get checkbox value - whether to use headers from the file
+    use_header = var_header.get()
+    # Get custom X-axis label (only if not using headers)
+    custom_label_x = entry_label_x.get() if not use_header else ''
+    # Get custom Y-axis label (only if not using headers)
+    custom_label_y = entry_label_y.get() if not use_header else ''
+    
+    # Open file selection dialog
+    filepath = filedialog.askopenfilename(
+        title="Select data file",  # Window title
+        filetypes=[("Text files", "*.txt *.csv"), ("All files", "*.*")]  # File filters
+    )
+    # If the user canceled file selection, return None
+    if not filepath:
+        return None, None, None, None
+
+    # Initialize empty lists for X and Y data
+    x = []
+    y = []
+    # Set default axis labels
+    label_x = custom_label_x if not use_header else "X"
+    label_y = custom_label_y if not use_header else "Y"
+    
+    # Try-except block to handle errors during file reading
+    try:
+        # Open file in read mode with UTF-8 encoding
+        with open(filepath, 'r', encoding='utf-8') as f:
+            # Read all lines from the file
+            lines = f.readlines()
+            # Check if the file is not empty
+            if not lines:
+                messagebox.showerror("Error", "The file should contain data.")
+                return None, None, None, None
+
+            # If using headers from the file
+            if use_header:
+                # Check if the file has at least 2 lines (header + data)
+                if len(lines) < 2:
+                    messagebox.showerror("Error", "The file should contain headers and data.")
+                    return None, None, None, None
+                
+                # Get the first line as header and strip whitespace
+                header_line = lines[0].strip()
+                # Replace separators with tabs and split into parts
+                header_parts = header_line.replace(';', '\t').replace(',', '\t').split('\t')
+                
+                # If the header has at least 2 columns, use them as axis labels
+                if len(header_parts) >= 2:
+                    label_x = header_parts[0].strip()  # First column as X label
+                    label_y = header_parts[1].strip()  # Second column as Y label
+                
+                # Data starts from the second line
+                data_lines = lines[1:]
+            else:
+                # If not using headers, all lines are data
+                data_lines = lines
+
+            # Process each data line
+            for line in data_lines:
+                # Clean the line and replace separators with spaces, then split
+                parts = (
+                    line.strip()           # Remove leading/trailing whitespace
+                    .replace(';', ' ')     # Replace semicolons with spaces
+                    .replace(',', ' ')     # Replace commas with spaces
+                    .replace('\t', ' ')    # Replace tabs with spaces
+                    .split()               # Split into elements
+                )
+                # If the line has at least 2 values
+                if len(parts) >= 2:
+                    try:
+                        # Convert first value to float (handling decimal commas)
+                        x_val = float(parts[0].replace(',', '.').replace(';', '.'))
+                        # Convert second value to float
+                        y_val = float(parts[1].replace(',', '.').replace(';', '.'))
+                        # Append values to lists
+                        x.append(x_val)
+                        y.append(y_val)
+                    except ValueError:
+                        # If conversion fails, skip this line
+                        continue
+
+    # Handle other errors while reading the file
+    except Exception as e:
+        messagebox.showerror("Error", f"Could not read the file: {e}")
+        return None, None, None, None
+
+    # Check if data is valid
+    if not x or not y or len(x) != len(y):
+        messagebox.showerror("Error", "Invalid or incomplete data in the file.")
+        return None, None, None, None
+
+    # Return loaded data and labels
+    return x, y, label_x, label_y
+
+# Function to draw a 2D histogram
+def draw_hist2d():
+    # Reference to the global plot variable
+    global current_figure
+    
+    # Load data from file
+    x, y, label_x, label_y = load_data_from_file()
+    
+    # If loading failed, exit function
+    if x is None or y is None:
+        return
+
+    # Handle bin count for the histogram
+    try:
+        # Get bin count from the text entry and convert to int
+        bins_count = int(entry_bins.get())
+        # Check if bin count is valid (minimum 2)
+        if bins_count < 2:
+            messagebox.showerror("Error", "Number of bins must be at least 2!")
+            return
+        # Warning for high bin count
+        if bins_count > 100:
+            messagebox.showwarning("Warning", "A large number of bins may affect performance!")
+    except ValueError:
+        # Handle error when the user enters an invalid value
+        messagebox.showerror("Error", "Please provide a valid number of bins!")
+        return
+
+    # Remove all previous elements from the plot frame
+    for widget in frame_plot.winfo_children():
+        widget.destroy()
+
+    # Create a new matplotlib figure with size 6x5 inches
+    fig, ax = plt.subplots(figsize=(6, 5))
+    # Create the 2D histogram with the specified bin count
+    h = ax.hist2d(x, y, bins=bins_count)
+    # Set X-axis label
+    ax.set_xlabel(label_x)
+    # Set Y-axis label
+    ax.set_ylabel(label_y)
+    # Set plot title with bin count information
+    ax.set_title(f'2D Histogram ({bins_count}x{bins_count} bins)')
+    # Add a colorbar with a label
+    fig.colorbar(h[3], ax=ax, label='Number of points')
+    # Automatically adjust layout
+    fig.tight_layout()
+
+    # Save the plot to the global variable (for export)
+    current_figure = fig
+
+    # Create a tkinter canvas with the matplotlib plot
+    canvas = FigureCanvasTkAgg(fig, master=frame_plot)
+    # Draw the plot
+    canvas.draw()
+    # Place the canvas in the frame, filling the entire space
+    canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+    
+    # Enable the export button
+    btn_export.config(state="normal")
+
+# Function to export the histogram to a PNG file
+def export_to_png():
+    # Reference to the global plot variable
+    global current_figure
+    
+    # Open file save dialog
+    filepath = filedialog.asksaveasfilename(
+        title="Save histogram as PNG",        # Window title
+        defaultextension=".png",              # Default extension
+        filetypes=[("PNG Files", "*.png"), ("All files", "*.*")]  # File filters
+    )
+    
+    # If the user canceled saving, exit function
+    if not filepath:
+        return
+    
+    # Try-except block to handle errors during saving
+    try:
+        # Save the plot as PNG with high resolution
+        current_figure.savefig(
+            filepath,                # File path
+            format='png',            # File format
+            dpi=300,                 # Resolution (dots per inch)
+            bbox_inches='tight',     # Tight margin cropping
+            facecolor='white',       # Background color
+            edgecolor='none'         # No edge color
+        )
+        # Display success message
+        messagebox.showinfo("Success", f"Histogram has been saved as:\n{filepath}")
+    except Exception as e:
+        # Handle errors during saving
+        messagebox.showerror("Error", f"Could not save the file: {e}")
+
+# Function handling header checkbox state changes
+def on_header_toggle():
+    # If the checkbox is checked (using headers)
+    if var_header.get():
+        # Disable fields for entering custom axis names
+        entry_label_x.config(state="disabled")
+        entry_label_y.config(state="disabled")
+    else:
+        # Enable fields for entering custom axis names
+        entry_label_x.config(state="normal")
+        entry_label_y.config(state="normal")
+
+# Create the main application window
+root = tk.Tk()
+# Set window title
+root.title("2D Histogram")
+# Set window size (width x height)
+root.geometry("800x600")
+
+# Create information label
+label_info = tk.Label(root, text="Load data from a .csv or .txt file")
+# Place the label with top margin
+label_info.pack(pady=(10,0))
+
+# Create IntVar for the checkbox (checked by default)
+var_header = tk.IntVar(value=1)
+# Create a frame for the checkbox
+frame_check = tk.Frame(root)
+# Create checkbox to choose whether to use headers
+check_header = tk.Checkbutton(
+    frame_check, text="Get variable names from the first row of the file",
+    variable=var_header, command=on_header_toggle
+)
+# Place checkbox on the left side of the frame
+check_header.pack(side="left")
+# Place the checkbox frame with margin
+frame_check.pack(pady=3)
+
+# Create a frame for axis name fields
+frame_labels = tk.Frame(root)
+# Label for X-axis name field
+tk.Label(frame_labels, text="X-axis label:").pack(side="left")
+# Text entry for X-axis name
+entry_label_x = tk.Entry(frame_labels, width=15)
+# Insert default value "X"
+entry_label_x.insert(0, "X")
+# Place the field with margin
+entry_label_x.pack(side="left", padx=5)
+# Label for Y-axis name field
+tk.Label(frame_labels, text="Y-axis label:").pack(side="left")
+# Text entry for Y-axis name
+entry_label_y = tk.Entry(frame_labels, width=15)
+# Insert default value "Y"
+entry_label_y.insert(0, "Y")
+# Place the field with margin
+entry_label_y.pack(side="left", padx=5)
+# Place the label frame with margin
+frame_labels.pack(pady=3)
+
+# Create a frame for setting the bin count
+frame_bins = tk.Frame(root)
+# Label for bin count field
+tk.Label(frame_bins, text="Number of bins:").pack(side="left")
+# Text entry for bin count
+entry_bins = tk.Entry(frame_bins, width=8)
+# Insert default value "10"
+entry_bins.insert(0, "10")
+# Place the field with margin
+entry_bins.pack(side="left", padx=5)
+# Place the frame with margin
+frame_bins.pack(pady=5)
+
+# Call function to set initial field states (disabled when checkbox is checked)
+on_header_toggle()
+
+# Create a frame for buttons
+frame_buttons = tk.Frame(root)
+# Button to select file and draw the histogram
+btn_file = tk.Button(frame_buttons, text="Select file and draw 2D histogram", command=draw_hist2d)
+# Place button on the left with margin
+btn_file.pack(side="left", padx=5)
+
+# Export button (initially disabled)
+btn_export = tk.Button(frame_buttons, text="Export to PNG", command=export_to_png, state="disabled")
+# Place button on the left with margin
+btn_export.pack(side="left", padx=5)
+# Place the button frame with margin
+frame_buttons.pack(pady=10)
+
+# Create a frame for the plot
+frame_plot = tk.Frame(root)
+# Place the frame filling all available space
+frame_plot.pack(fill=tk.BOTH, expand=True)
+
+# Run the main tkinter application loop
+root.mainloop()
+-------------------------------------------------------------------------------------------------------------------------
 # Importowanie modułu tkinter do tworzenia interfejsu graficznego
 import tkinter as tk
 # Importowanie messagebox (okna dialogowe) i filedialog (okna wyboru plików) z tkinter
